@@ -1,0 +1,1 @@
+# escreva-me-obsidian-plugin
