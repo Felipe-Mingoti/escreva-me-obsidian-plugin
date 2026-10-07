@@ -1,0 +1,10 @@
+{
+  "id": "escreva-me-sync",
+  "name": "Escreva-me sync",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Sends vault notes to Escreva-me and writes exported reflections back into the vault.",
+  "author": "Felipe Mingoti",
+  "authorUrl": "https://escreva-me.com",
+  "isDesktopOnly": false
+}
