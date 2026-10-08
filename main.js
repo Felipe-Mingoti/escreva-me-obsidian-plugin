@@ -3,6 +3,7 @@ const { Notice, Plugin, PluginSettingTab, Setting, TFile, requestUrl } = require
 const API_BASE_URL = "https://app.escreva-me.com/api";
 const EXPORT_PREFIX = "Escreva-me/Reflections/";
 const DEBOUNCE_MS = 2000;
+const MAX_BATCH_CHARS = 4_000_000;
 
 function apiUrl(path) {
     return `${API_BASE_URL}${path}`;
@@ -15,6 +16,27 @@ function normalizePath(path) {
 function isReservedExportPath(path) {
     const normalized = normalizePath(path);
     return normalized === "Escreva-me/Reflections" || normalized.startsWith(EXPORT_PREFIX);
+}
+
+function failureText(error) {
+    const detail = error instanceof Error ? error.message : String(error ?? "");
+    return `Escreva-me sync failed. ${detail}`.slice(0, 220);
+}
+
+async function postJson(token, path, body) {
+    const response = await requestUrl({
+        url: apiUrl(path),
+        method: "POST",
+        contentType: "application/json",
+        throw: false,
+        headers: { Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+    });
+    if (response.status >= 400) {
+        const message = response.json?.message || response.text || `HTTP ${response.status}`;
+        throw new Error(String(message).replace(/\s+/g, " ").slice(0, 180));
+    }
+    return response;
 }
 
 class EscrevaMeSyncPlugin extends Plugin {
@@ -38,7 +60,7 @@ class EscrevaMeSyncPlugin extends Plugin {
         this.registerInterval(window.setInterval(() => this.pullOutbox(), 60_000));
         this.syncExistingNotes().catch((error) => {
             console.error("[escreva-me]", error);
-            new Notice("Escreva-me sync failed");
+            new Notice(failureText(error));
         });
     }
 
@@ -49,7 +71,7 @@ class EscrevaMeSyncPlugin extends Plugin {
         this.initialTimer = window.setTimeout(() => {
             this.syncExistingNotes().catch((error) => {
                 console.error("[escreva-me]", error);
-                new Notice("Escreva-me sync failed");
+                new Notice(failureText(error));
             });
         }, 1000);
     }
@@ -70,27 +92,29 @@ class EscrevaMeSyncPlugin extends Plugin {
         try {
             const files = this.app.vault.getMarkdownFiles()
                 .filter((file) => !isReservedExportPath(file.path));
-            for (let index = 0; index < files.length; index += 50) {
-                const changes = [];
-                for (const file of files.slice(index, index + 50)) {
-                    changes.push({
-                        path: file.path,
-                        content: await this.app.vault.read(file),
-                    });
-                }
+            let changes = [];
+            let batchChars = 0;
+            const flush = async () => {
                 if (changes.length === 0) {
-                    continue;
+                    return;
                 }
-                await requestUrl({
-                    url: apiUrl("/integrations/obsidian/changes"),
-                    method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${this.settings.pluginToken}`,
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({ changes }),
-                });
+                const payload = changes;
+                changes = [];
+                batchChars = 0;
+                await postJson(this.settings.pluginToken, "/integrations/obsidian/changes", { changes: payload });
+            };
+            for (const file of files) {
+                const content = await this.app.vault.read(file);
+                if (batchChars + content.length > MAX_BATCH_CHARS && changes.length > 0) {
+                    await flush();
+                }
+                changes.push({ path: file.path, content });
+                batchChars += content.length;
+                if (changes.length >= 20) {
+                    await flush();
+                }
             }
+            await flush();
             this.initialSyncComplete = true;
             await this.saveData({
                 ...this.settings,
@@ -120,7 +144,7 @@ class EscrevaMeSyncPlugin extends Plugin {
             this.timers.delete(key);
             this.pushFile(file, kind, previousPath).catch((error) => {
                 console.error("[escreva-me]", error);
-                new Notice("Escreva-me sync failed");
+                new Notice(failureText(error));
             });
         }, DEBOUNCE_MS));
     }
@@ -137,15 +161,7 @@ class EscrevaMeSyncPlugin extends Plugin {
         if (kind !== "delete") {
             change.content = await this.app.vault.read(file);
         }
-        await requestUrl({
-            url: apiUrl("/integrations/obsidian/changes"),
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${this.settings.pluginToken}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ changes: [change] }),
-        });
+        await postJson(this.settings.pluginToken, "/integrations/obsidian/changes", { changes: [change] });
     }
 
     async pullOutbox() {
@@ -178,15 +194,7 @@ class EscrevaMeSyncPlugin extends Plugin {
             } else {
                 await this.app.vault.create(path, markdown);
             }
-            await requestUrl({
-                url: apiUrl(`/integrations/obsidian/outbox/${item.id}/ack`),
-                method: "POST",
-                headers: {
-                    Authorization: `Bearer ${this.settings.pluginToken}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ remotePath: path }),
-            });
+            await postJson(this.settings.pluginToken, `/integrations/obsidian/outbox/${item.id}/ack`, { remotePath: path });
         }
     }
 }
