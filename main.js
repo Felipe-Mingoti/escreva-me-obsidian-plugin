@@ -1,4 +1,4 @@
-import { Notice, Plugin, PluginSettingTab, Setting, TFile, requestUrl } from "obsidian";
+const { Notice, Plugin, PluginSettingTab, Setting, TFile, requestUrl } = require("obsidian");
 
 const EXPORT_PREFIX = "Escreva-me/Reflections/";
 const DEBOUNCE_MS = 2000;
@@ -7,12 +7,12 @@ function normalizePath(path) {
     return path.replace(/\\/g, "/").replace(/^\/+/, "");
 }
 
-export function isReservedExportPath(path) {
+function isReservedExportPath(path) {
     const normalized = normalizePath(path);
     return normalized === "Escreva-me/Reflections" || normalized.startsWith(EXPORT_PREFIX);
 }
 
-export default class EscrevaMeSyncPlugin extends Plugin {
+class EscrevaMeSyncPlugin extends Plugin {
     settings = { apiBaseUrl: "", pluginToken: "" };
     timers = new Map();
     initialSyncComplete = false;
@@ -225,3 +225,5 @@ class EscrevaMeSettingTab extends PluginSettingTab {
                 }));
     }
 }
+
+module.exports = EscrevaMeSyncPlugin;
