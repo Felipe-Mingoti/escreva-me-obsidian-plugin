@@ -1,7 +1,12 @@
 const { Notice, Plugin, PluginSettingTab, Setting, TFile, requestUrl } = require("obsidian");
 
+const API_BASE_URL = "https://app.escreva-me.com/api";
 const EXPORT_PREFIX = "Escreva-me/Reflections/";
 const DEBOUNCE_MS = 2000;
+
+function apiUrl(path) {
+    return `${API_BASE_URL}${path}`;
+}
 
 function normalizePath(path) {
     return path.replace(/\\/g, "/").replace(/^\/+/, "");
@@ -13,7 +18,7 @@ function isReservedExportPath(path) {
 }
 
 class EscrevaMeSyncPlugin extends Plugin {
-    settings = { apiBaseUrl: "", pluginToken: "" };
+    settings = { pluginToken: "" };
     timers = new Map();
     initialSyncComplete = false;
     syncingExisting = false;
@@ -21,7 +26,6 @@ class EscrevaMeSyncPlugin extends Plugin {
     async onload() {
         const stored = await this.loadData();
         this.settings = {
-            apiBaseUrl: stored?.apiBaseUrl ?? "",
             pluginToken: stored?.pluginToken ?? "",
         };
         this.initialSyncComplete = stored?.initialSyncComplete === true;
@@ -54,7 +58,7 @@ class EscrevaMeSyncPlugin extends Plugin {
         if (this.initialSyncComplete) {
             return;
         }
-        if (!this.settings.pluginToken || !this.settings.apiBaseUrl) {
+        if (!this.settings.pluginToken) {
             return;
         }
         if (this.syncingExisting) {
@@ -78,7 +82,7 @@ class EscrevaMeSyncPlugin extends Plugin {
                     continue;
                 }
                 await requestUrl({
-                    url: `${this.settings.apiBaseUrl.replace(/\/$/, "")}/integrations/obsidian/changes`,
+                    url: apiUrl("/integrations/obsidian/changes"),
                     method: "POST",
                     headers: {
                         Authorization: `Bearer ${this.settings.pluginToken}`,
@@ -122,7 +126,7 @@ class EscrevaMeSyncPlugin extends Plugin {
     }
 
     async pushFile(file, kind, previousPath) {
-        if (!this.settings.pluginToken || !this.settings.apiBaseUrl) {
+        if (!this.settings.pluginToken) {
             return;
         }
         const change = {
@@ -134,7 +138,7 @@ class EscrevaMeSyncPlugin extends Plugin {
             change.content = await this.app.vault.read(file);
         }
         await requestUrl({
-            url: `${this.settings.apiBaseUrl.replace(/\/$/, "")}/integrations/obsidian/changes`,
+            url: apiUrl("/integrations/obsidian/changes"),
             method: "POST",
             headers: {
                 Authorization: `Bearer ${this.settings.pluginToken}`,
@@ -145,11 +149,11 @@ class EscrevaMeSyncPlugin extends Plugin {
     }
 
     async pullOutbox() {
-        if (!this.settings.pluginToken || !this.settings.apiBaseUrl) {
+        if (!this.settings.pluginToken) {
             return;
         }
         const response = await requestUrl({
-            url: `${this.settings.apiBaseUrl.replace(/\/$/, "")}/integrations/obsidian/outbox`,
+            url: apiUrl("/integrations/obsidian/outbox"),
             method: "GET",
             headers: { Authorization: `Bearer ${this.settings.pluginToken}` },
         });
@@ -175,7 +179,7 @@ class EscrevaMeSyncPlugin extends Plugin {
                 await this.app.vault.create(path, markdown);
             }
             await requestUrl({
-                url: `${this.settings.apiBaseUrl.replace(/\/$/, "")}/integrations/obsidian/outbox/${item.id}/ack`,
+                url: apiUrl(`/integrations/obsidian/outbox/${item.id}/ack`),
                 method: "POST",
                 headers: {
                     Authorization: `Bearer ${this.settings.pluginToken}`,
@@ -196,20 +200,6 @@ class EscrevaMeSettingTab extends PluginSettingTab {
     display() {
         const { containerEl } = this;
         containerEl.empty();
-        new Setting(containerEl)
-            .setName("API base URL")
-            .setDesc("Escreva-me API origin, without a trailing slash.")
-            .addText((text) => text
-                .setPlaceholder("https://example.com")
-                .setValue(this.plugin.settings.apiBaseUrl)
-                .onChange(async (value) => {
-                    this.plugin.settings.apiBaseUrl = value.trim();
-                    await this.plugin.saveData({
-                        ...this.plugin.settings,
-                        initialSyncComplete: this.plugin.initialSyncComplete,
-                    });
-                    this.plugin.scheduleInitialSync();
-                }));
         new Setting(containerEl)
             .setName("Plugin token")
             .setDesc("Shown once when you connect Obsidian in Escreva-me.")
